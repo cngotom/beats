@@ -4,10 +4,12 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/elastic/beats/libbeat/logp"
+
 	"github.com/elastic/beats/libbeat/common"
 )
 
-func eventMapping(key string, data common.MapStr) (common.MapStr, error) {
+func eventMappingDiff(key string, data common.MapStr, oldData common.MapStr) (common.MapStr, error) {
 	names := strings.SplitN(key, ".", 2)
 
 	if len(names) < 2 {
@@ -20,65 +22,104 @@ func eventMapping(key string, data common.MapStr) (common.MapStr, error) {
 		"name":       key,
 		"total": common.MapStr{
 			"time": common.MapStr{
-				"us": mustGetMapStrValue(data, "total.time"),
+				"us": mustDiffMapStrValue(oldData, data, "total.time"),
 			},
-			"count": mustGetMapStrValue(data, "total.count"),
+			"count": mustDiffMapStrValue(oldData, data, "total.count"),
 		},
 		"lock": common.MapStr{
 			"read": common.MapStr{
 				"time": common.MapStr{
-					"us": mustGetMapStrValue(data, "readLock.time"),
+					"us": mustDiffMapStrValue(oldData, data, "readLock.time"),
 				},
-				"count": mustGetMapStrValue(data, "readLock.count"),
+				"count": mustDiffMapStrValue(oldData, data, "readLock.count"),
 			},
 			"write": common.MapStr{
 				"time": common.MapStr{
-					"us": mustGetMapStrValue(data, "writeLock.time"),
+					"us": mustDiffMapStrValue(oldData, data, "writeLock.time"),
 				},
-				"count": mustGetMapStrValue(data, "writeLock.count"),
+				"count": mustDiffMapStrValue(oldData, data, "writeLock.count"),
 			},
 		},
 		"queries": common.MapStr{
 			"time": common.MapStr{
-				"us": mustGetMapStrValue(data, "queries.time"),
+				"us": mustDiffMapStrValue(oldData, data, "queries.time"),
 			},
-			"count": mustGetMapStrValue(data, "queries.count"),
+			"count": mustDiffMapStrValue(oldData, data, "queries.count"),
 		},
 		"getmore": common.MapStr{
 			"time": common.MapStr{
-				"us": mustGetMapStrValue(data, "getmore.time"),
+				"us": mustDiffMapStrValue(oldData, data, "getmore.time"),
 			},
-			"count": mustGetMapStrValue(data, "getmore.count"),
+			"count": mustDiffMapStrValue(oldData, data, "getmore.count"),
 		},
 		"insert": common.MapStr{
 			"time": common.MapStr{
-				"us": mustGetMapStrValue(data, "insert.time"),
+				"us": mustDiffMapStrValue(oldData, data, "insert.time"),
 			},
-			"count": mustGetMapStrValue(data, "insert.count"),
+			"count": mustDiffMapStrValue(oldData, data, "insert.count"),
 		},
 		"update": common.MapStr{
 			"time": common.MapStr{
-				"us": mustGetMapStrValue(data, "update.time"),
+				"us": mustDiffMapStrValue(oldData, data, "update.time"),
 			},
-			"count": mustGetMapStrValue(data, "update.count"),
+			"count": mustDiffMapStrValue(oldData, data, "update.count"),
 		},
 		"remove": common.MapStr{
 			"time": common.MapStr{
-				"us": mustGetMapStrValue(data, "remove.time"),
+				"us": mustDiffMapStrValue(oldData, data, "remove.time"),
 			},
-			"count": mustGetMapStrValue(data, "remove.count"),
+			"count": mustDiffMapStrValue(oldData, data, "remove.count"),
 		},
 		"commands": common.MapStr{
 			"time": common.MapStr{
-				"us": mustGetMapStrValue(data, "commands.time"),
+				"us": mustDiffMapStrValue(oldData, data, "commands.time"),
 			},
-			"count": mustGetMapStrValue(data, "commands.count"),
+			"count": mustDiffMapStrValue(oldData, data, "commands.count"),
 		},
 	}
 
 	return event, nil
 }
+func convertToInt(value interface{}) int {
+	switch v := value.(type) {
+	case float32:
+		return int(v)
 
+	case float64:
+		// numeric in sqlite3 sends us float64
+
+		return int(v)
+	case int64:
+		// at least in sqlite3 when the value is 0 in db, the data is sent
+		// to us as an int64 instead of a float64 ...
+		return int(v)
+	case int:
+		return int(v)
+	default:
+		logp.Warn("unknow type %v", v)
+
+		return 0
+	}
+
+}
+
+func castDiff(o, v interface{}) interface{} {
+
+	return convertToInt(v) - convertToInt(o)
+	//return dv.Add(do.Neg())
+}
+
+func mustDiffMapStrValue(oldData common.MapStr, m common.MapStr, key string) interface{} {
+	o, err := oldData.GetValue(key)
+	if err != nil {
+		o = 0
+	}
+	v, _ := m.GetValue(key)
+
+	res := castDiff(o, v)
+	//	logp.Info("Old %d, v %d, key %s, diff %s", o, v, key, res)
+	return res
+}
 func mustGetMapStrValue(m common.MapStr, key string) interface{} {
 	v, _ := m.GetValue(key)
 	return v

@@ -7,7 +7,6 @@ import (
 	"github.com/elastic/beats/libbeat/logp"
 	"github.com/elastic/beats/metricbeat/mb"
 	"github.com/elastic/beats/metricbeat/module/mongodb"
-
 	"gopkg.in/mgo.v2"
 )
 
@@ -48,6 +47,11 @@ func New(base mb.BaseMetricSet) (mb.MetricSet, error) {
 // Fetch methods implements the data gathering and data conversion to the right format
 // It returns the event which is then forward to the output. In case of an error, a
 // descriptive error must be returned.
+var (
+	lastTotal     *common.MapStr
+	lastTotalInit bool
+)
+
 func (m *MetricSet) Fetch() ([]common.MapStr, error) {
 	// events is the list of events collected from each of the collections.
 	var events []common.MapStr
@@ -92,7 +96,21 @@ func (m *MetricSet) Fetch() ([]common.MapStr, error) {
 			continue
 		}
 
-		event, err := eventMapping(group, infoMap)
+		oldInfoMap := make(map[string]interface{})
+
+		if lastTotal != nil {
+			if lastInfo, err := lastTotal.GetValue(group); err == nil {
+				var ok bool
+				oldInfoMap, ok = lastInfo.(common.MapStr)
+				if !ok {
+					err = errors.New("Unexpected data returned by mongodb")
+					logp.Err(err.Error())
+					continue
+				}
+			}
+		}
+
+		event, err := eventMappingDiff(group, infoMap, oldInfoMap)
 		if err != nil {
 			logp.Err("Mapping of the event data filed")
 			continue
@@ -100,6 +118,8 @@ func (m *MetricSet) Fetch() ([]common.MapStr, error) {
 
 		events = append(events, event)
 	}
+
+	lastTotal = &totals
 
 	return events, nil
 }
